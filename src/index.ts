@@ -110,6 +110,8 @@ async function checkAccount(config: Config, account: Account, now: Date): Promis
 
     return {
       label: account.label,
+      loanCount: info.loans.length,
+      reservationCount: info.reservations.length,
       readyReservations: info.reservations.filter((r) => r.isReady),
       dueSoonLoans: info.loans.filter((l) => l.daysLeft <= config.dueSoonDays),
     };
@@ -136,15 +138,12 @@ async function main(): Promise<void> {
     }
   }
 
-  const notifiable = reports.filter((r) => r.readyReservations.length > 0 || r.dueSoonLoans.length > 0);
-  if (notifiable.length === 0) {
-    console.log('通知対象はありません。');
-  } else {
-    const mentionChannel = notifiable.some((r) =>
+  if (reports.length > 0) {
+    const mentionChannel = reports.some((r) =>
       r.dueSoonLoans.some((l) => l.daysLeft < config.mentionChannelDays),
     );
     const showLabels = config.accounts.length > 1;
-    await notify(config, buildReportMessage(today, notifiable, { mentionChannel, showLabels }));
+    await notify(config, buildReportMessage(today, reports, { mentionChannel, showLabels }));
     console.log('Slackに通知しました。');
   }
 

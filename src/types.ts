@@ -36,10 +36,16 @@ export interface Config {
   dryRun: boolean;
 }
 
-/** 1アカウント分のチェック結果（通知対象のみ） */
+/** 1アカウント分のチェック結果 */
 export interface AccountReport {
   label: string;
+  /** 貸出中の総数 */
+  loanCount: number;
+  /** 予約中の総数 */
+  reservationCount: number;
+  /** 通知対象: 受取可能な予約 */
   readyReservations: Reservation[];
+  /** 通知対象: 返却期限が近い貸出 */
   dueSoonLoans: Loan[];
 }
 

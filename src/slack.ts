@@ -14,7 +14,8 @@ export async function postToSlack(webhookUrl: string, text: string): Promise<voi
 
 /**
  * 通知メッセージを組み立てる。
- * reports は通知対象のあるアカウントのみを渡す。複数アカウントの場合はラベルごとに区切る。
+ * 全アカウントの貸出数・予約数を表示し、受取可能な予約・返却期限が近い貸出があればその一覧を付ける。
+ * 複数アカウントの場合はラベルごとに区切る。
  */
 export function buildReportMessage(
   today: string,
@@ -28,7 +29,8 @@ export function buildReportMessage(
   for (const report of reports) {
     // 複数アカウント時はラベル行で区切り、その配下の見出し前には空行を入れない
     const gap = options.showLabels ? [] : [''];
-    if (options.showLabels) lines.push('', `👤 ${report.label}`);
+    const counts = `貸出 ${report.loanCount}件 / 予約 ${report.reservationCount}件`;
+    lines.push(...(options.showLabels ? ['', `👤 ${report.label}（${counts}）`] : [counts]));
     if (report.readyReservations.length > 0) {
       lines.push(...gap, '🟢 受取可能な予約:');
       for (const r of report.readyReservations) {
@@ -42,6 +44,9 @@ export function buildReportMessage(
       }
     }
   }
+
+  const hasTarget = reports.some((r) => r.readyReservations.length > 0 || r.dueSoonLoans.length > 0);
+  if (!hasTarget) lines.push('', '✅ 受取可能な予約・返却期限が近い貸出はありません');
 
   return lines.join('\n');
 }
