@@ -9,12 +9,37 @@
 
 ## セットアップ
 
+認証情報は [1Password CLI](https://developer.1password.com/docs/cli/) 経由で読み込む。`.env` には平文の秘密を書かず、1Passwordの参照URI（`op://`）を書いておき、`op run` が実行時に実値へ展開する。
+
+### 1. 1Passwordにアイテムを作成する
+
+任意のボールトに以下のフィールドを持つアイテムを作成する（例: ボールト `Personal`、アイテム `Otsu Library`）。
+
+| フィールド | 内容 |
+| --- | --- |
+| `card_no` | 利用券番号 |
+| `password` | パスワード |
+| `slack_webhook_url` | Slack Incoming Webhook URL |
+
+### 2. 依存関係のインストールと `.env` の作成
+
 ```bash
+brew install 1password-cli   # 未インストールの場合
 npm install
 cp .env.example .env
-vim .env   # 利用券番号・パスワード・Slack Webhook URLを設定
+vim .env   # op:// 参照をボールト名・アイテム名に合わせて修正
 npm run build
 ```
+
+`.env` の記述例:
+
+```dotenv
+OTSU_LIBRARY_CARD_NO="op://Personal/Otsu Library/card_no"
+OTSU_LIBRARY_PASSWORD="op://Personal/Otsu Library/password"
+SLACK_WEBHOOK_URL="op://Personal/Otsu Library/slack_webhook_url"
+```
+
+参照URIは `op://<ボールト名>/<アイテム名またはID>/<フィールド名>` の形式。アイテム名に空白を含む場合はダブルクォートで囲む。
 
 ### 環境変数
 
@@ -29,40 +54,62 @@ npm run build
 
 ## 実行
 
+`op run` で `.env` の `op://` 参照を展開してから実行する。初回や1Passwordがロックされている場合は認証プロンプト（Touch ID等）が表示される。
+
 ```bash
 # ビルド済みのものを実行
-npm start
+op run --env-file=.env -- npm start
 
 # ビルドせずに直接実行
-npm run dev
+op run --env-file=.env -- npm run dev
 
 # Slackに送らず内容を確認
-DRY_RUN=1 npm start
+op run --env-file=.env -- env DRY_RUN=1 node dist/index.js
 ```
+
+`dotenv` も `.env` を読み込むが、既に設定済みの環境変数は上書きしないため、`op run` が展開した実値が優先される。
 
 ## 初回動作確認
 
-貸出・予約照会ページのHTML構造は柔軟にパースするようにしているが、想定と異なる場合はパース結果が空になることがある。初回は以下で結果を確認する。
+利用者のページのHTML構造が想定と異なる場合、パース結果が空になったり誤った値になることがある。初回は以下で結果を確認する。
 
 ```bash
-DRY_RUN=1 DEBUG_DUMP_HTML=1 npm start
+op run --env-file=.env -- env DRY_RUN=1 DEBUG_DUMP_HTML=1 node dist/index.js
 ```
 
 標準出力に貸出中・予約中の一覧が表示される。マイページの表示と食い違う場合は `debug/*-user-info.html` を元に `src/parser.ts` を調整する。
 
-## 定期実行（cron）
+パーサーはテーブルのヘッダー行から列を特定している。「返却期限」列を持つテーブルを貸出一覧、「状況」列と「予約日」列を持つテーブルを予約一覧として扱う。
 
-毎朝8時に実行する例。`.env` は `dotenv` により自動で読み込まれるため、リポジトリのディレクトリで実行すればよい。
+## 定期実行
 
-```cron
-0 8 * * * cd /path/to/otsu-library-checker && /usr/local/bin/node dist/index.js >> /tmp/otsu-library-checker.log 2>&1
+無人実行では `op` が認証プロンプトを出せないため、以下のいずれかが必要。
+
+- **1Passwordアプリとの連携**: 1Passwordアプリの設定で「1Password CLIと連携」を有効にする。アプリがロック解除されていれば動作するが、ロック中は失敗する。
+- **サービスアカウント（推奨）**: 1Passwordで[サービスアカウント](https://developer.1password.com/docs/service-accounts/)を作成し、対象ボールトへの読み取り権限を付与する。トークンを `OP_SERVICE_ACCOUNT_TOKEN` として渡すと認証プロンプトなしで動作する。
+
+サービスアカウントのトークンはplistや `.env` に直書きせず、macOSのKeychainに保存して実行時に取り出す。
+
+```bash
+# Keychainにトークンを保存（初回のみ）
+security add-generic-password -s otsu-library-checker-op -a "$USER" -w '<サービスアカウントトークン>'
 ```
-
-`node` のパスは `which node` で確認する（nvm等を使っている場合は絶対パスで指定する）。
 
 ### launchd を使う場合（macOS）
 
-`~/Library/LaunchAgents/local.otsu-library-checker.plist` を作成する。
+`op run` を経由するため、実行するのはラッパースクリプトにする。`bin/run.sh` として以下を作成し、`chmod +x bin/run.sh` しておく。
+
+```bash
+#!/bin/zsh
+set -eu
+cd "$(dirname "$0")/.."
+export OP_SERVICE_ACCOUNT_TOKEN="$(security find-generic-password -s otsu-library-checker-op -w)"
+exec /opt/homebrew/bin/op run --env-file=.env -- /opt/homebrew/bin/node dist/index.js
+```
+
+`op` と `node` のパスは `which op` / `which node` で確認する（nvm等を使っている場合は絶対パスで指定する）。
+
+`~/Library/LaunchAgents/local.otsu-library-checker.plist` を作成する（毎朝8時に実行する例）。
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -73,11 +120,8 @@ DRY_RUN=1 DEBUG_DUMP_HTML=1 npm start
   <string>local.otsu-library-checker</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/local/bin/node</string>
-    <string>dist/index.js</string>
+    <string>/path/to/otsu-library-checker/bin/run.sh</string>
   </array>
-  <key>WorkingDirectory</key>
-  <string>/path/to/otsu-library-checker</string>
   <key>StartCalendarInterval</key>
   <dict>
     <key>Hour</key>
@@ -95,6 +139,16 @@ DRY_RUN=1 DEBUG_DUMP_HTML=1 npm start
 
 ```bash
 launchctl load ~/Library/LaunchAgents/local.otsu-library-checker.plist
+
+# 手動で即時実行して動作確認
+launchctl start local.otsu-library-checker
+tail -f /tmp/otsu-library-checker.log
+```
+
+### cron を使う場合
+
+```cron
+0 8 * * * /path/to/otsu-library-checker/bin/run.sh >> /tmp/otsu-library-checker.log 2>&1
 ```
 
 ## 通知例
