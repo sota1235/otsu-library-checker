@@ -13,13 +13,14 @@
 
 ### 1. 1Passwordにアイテムを作成する
 
-任意のボールトに以下のフィールドを持つアイテムを作成する（例: ボールト `Personal`、アイテム `Otsu Library`）。
+任意のボールトに、図書館アカウントごとに以下のフィールドを持つアイテムを作成する（例: ボールト `Personal`、アイテム `Otsu Library`）。
 
 | フィールド | 内容 |
 | --- | --- |
 | `card_no` | 利用券番号 |
 | `password` | パスワード |
-| `slack_webhook_url` | Slack Incoming Webhook URL |
+
+Slack Incoming Webhook URL も同様に1Passwordに保存しておく（同じアイテムのフィールドでも別アイテムでもよい）。
 
 ### 2. 依存関係のインストールと `.env` の作成
 
@@ -31,11 +32,17 @@ vim .env   # op:// 参照をボールト名・アイテム名に合わせて修�
 npm run build
 ```
 
-`.env` の記述例:
+`.env` の記述例（2アカウント）:
 
 ```dotenv
-OTSU_LIBRARY_CARD_NO="op://Personal/Otsu Library/card_no"
-OTSU_LIBRARY_PASSWORD="op://Personal/Otsu Library/password"
+OTSU_LIBRARY_LABEL_1=パパ
+OTSU_LIBRARY_CARD_NO_1="op://Personal/Otsu Library/card_no"
+OTSU_LIBRARY_PASSWORD_1="op://Personal/Otsu Library/password"
+
+OTSU_LIBRARY_LABEL_2=子ども
+OTSU_LIBRARY_CARD_NO_2="op://Personal/Otsu Library (Kid)/card_no"
+OTSU_LIBRARY_PASSWORD_2="op://Personal/Otsu Library (Kid)/password"
+
 SLACK_WEBHOOK_URL="op://Personal/Otsu Library/slack_webhook_url"
 ```
 
@@ -45,12 +52,16 @@ SLACK_WEBHOOK_URL="op://Personal/Otsu Library/slack_webhook_url"
 
 | 変数名 | 必須 | 説明 |
 | --- | --- | --- |
-| `OTSU_LIBRARY_CARD_NO` | ✅ | 利用券番号 |
-| `OTSU_LIBRARY_PASSWORD` | ✅ | パスワード |
+| `OTSU_LIBRARY_CARD_NO_<n>` | ✅ | n番目のアカウントの利用券番号（n = 1, 2, ...） |
+| `OTSU_LIBRARY_PASSWORD_<n>` | ✅ | n番目のアカウントのパスワード |
+| `OTSU_LIBRARY_LABEL_<n>` | | n番目のアカウントの表示名（省略時: `アカウントn`） |
 | `SLACK_WEBHOOK_URL` | ✅ | Slack Incoming Webhook URL |
 | `DUE_SOON_DAYS` | | 返却期限の何日前から通知するか（デフォルト: 7） |
+| `MENTION_CHANNEL_DAYS` | | 返却期限までの残日数がこの値を切ったら `@channel` を付ける（デフォルト: 7） |
 | `DRY_RUN` | | `1` でSlackに送信せず標準出力にメッセージを表示 |
 | `DEBUG_DUMP_HTML` | | `1` で取得したHTMLを `debug/` に保存（トラブルシュート用） |
+
+アカウントは `_1` から連番で読み込み、番号が途切れたところで終了する。1アカウントのみの場合はサフィックスなし（`OTSU_LIBRARY_CARD_NO` / `OTSU_LIBRARY_PASSWORD` / `OTSU_LIBRARY_LABEL`）でも指定できる。
 
 ## 実行
 
@@ -162,6 +173,24 @@ tail -f /tmp/otsu-library-checker.log
 ⏰ 返却期限が近い貸出:
 ・『本のタイトル』(残り3日: 2026/09/13)
 ```
+
+返却期限までの残日数が `MENTION_CHANNEL_DAYS` を切った貸出がある場合は、先頭に `@channel 返却期限が迫っています` が付く。
+
+複数アカウントを設定している場合は、通知対象のあるアカウントのみをラベルで区切って1通にまとめる。
+
+```
+📚 大津図書館チェック結果 (2026-09-10)
+
+👤 パパ
+⏰ 返却期限が近い貸出:
+・『本のタイトル』(残り3日: 2026/09/13)
+
+👤 子ども
+🟢 受取可能な予約:
+・『本のタイトル』
+```
+
+一部のアカウントでログイン等に失敗した場合は、他のアカウントの結果を通知したうえで、失敗したアカウントのエラーを別メッセージで通知し、非ゼロ終了コードで終了する。
 
 ## 構成
 

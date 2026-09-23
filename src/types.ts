@@ -19,11 +19,31 @@ export interface UserInfo {
   reservations: Reservation[];
 }
 
-export interface Config {
+export interface Account {
+  /** 通知やログで表示する名前 */
+  label: string;
   cardNo: string;
   password: string;
+}
+
+export interface Config {
+  accounts: Account[];
   slackWebhookUrl: string;
   dueSoonDays: number;
+  /** 返却期限までの残日数がこの値を切ったら @channel メンションを付ける */
+  mentionChannelDays: number;
   dumpHtml: boolean;
   dryRun: boolean;
+}
+
+/** 1アカウント分のチェック結果（通知対象のみ） */
+export interface AccountReport {
+  label: string;
+  readyReservations: Reservation[];
+  dueSoonLoans: Loan[];
+}
+
+export interface AccountError {
+  label: string;
+  error: unknown;
 }
