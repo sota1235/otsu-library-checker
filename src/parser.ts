@@ -13,12 +13,22 @@ const RANK_HEADER_RE = /^順位/;
 
 type ColumnMap = Record<string, number>;
 
+export class ParseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ParseError';
+  }
+}
+
 /**
  * 利用者のページのHTMLから貸出中・予約中の一覧を抽出する。
  *
  * ページ内の各テーブルのヘッダー行（th）を見て列を特定する。
  * - 「返却期限」列を持つテーブル → 貸出一覧
  * - 「状況」列と「予約日」列を持つテーブル → 予約一覧
+ *
+ * ページ上部のタブ見出し（「貸出 <件数>」「予約 <件数>」）の件数と照合し、
+ * 一致しない場合はサイト構造が変わった可能性があるため ParseError を投げる。
  */
 export function parseUserInfo(html: string, today: Date = new Date()): UserInfo {
   const $ = cheerio.load(html);
@@ -56,7 +66,29 @@ export function parseUserInfo(html: string, today: Date = new Date()): UserInfo 
     }
   });
 
+  const expected = extractTabCounts($);
+  if (expected.loans !== loans.length || expected.reservations !== reservations.length) {
+    throw new ParseError(
+      `件数が一致しません（サイト構造が変わった可能性があります）: ` +
+        `貸出 見出し${expected.loans}件/解析${loans.length}件, ` +
+        `予約 見出し${expected.reservations}件/解析${reservations.length}件`,
+    );
+  }
+
   return { loans, reservations };
+}
+
+/** タブ見出しの「貸出 <件数>」「予約 <件数>」を読み取る。見つからなければ ParseError */
+function extractTabCounts($: cheerio.CheerioAPI): { loans: number; reservations: number } {
+  const counts: Record<string, number> = {};
+  $('h1, h2, h3, h4').each((_, el) => {
+    const m = normalize($(el).text()).match(/^(貸出|予約)\s*(\d+)$/);
+    if (m && counts[m[1]] === undefined) counts[m[1]] = Number(m[2]);
+  });
+  if (counts['貸出'] === undefined || counts['予約'] === undefined) {
+    throw new ParseError('貸出・予約の件数見出しが見つかりません（サイト構造が変わった可能性があります）');
+  }
+  return { loans: counts['貸出'], reservations: counts['予約'] };
 }
 
 function mapColumns(headers: string[]): ColumnMap {
