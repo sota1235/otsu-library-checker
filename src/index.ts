@@ -96,7 +96,7 @@ async function notify(config: Config, text: string): Promise<void> {
   await postToSlack(config.slackWebhookUrl, text);
 }
 
-/** 1アカウント分のログイン・取得・判定を行い、通知対象を返す */
+/** 1アカウント分のログイン・取得・判定を行い、チェック結果を返す */
 async function checkAccount(config: Config, account: Account, now: Date): Promise<AccountReport> {
   const client = new LibraryClient();
   try {
@@ -143,8 +143,11 @@ async function main(): Promise<void> {
       r.dueSoonLoans.some((l) => l.daysLeft < config.mentionChannelDays),
     );
     const showLabels = config.accounts.length > 1;
-    await notify(config, buildReportMessage(today, reports, { mentionChannel, showLabels }));
+    const failedLabels = errors.map((e) => e.label);
+    await notify(config, buildReportMessage(today, reports, { mentionChannel, showLabels, failedLabels }));
     console.log('Slackに通知しました。');
+  } else {
+    console.log('全アカウントで取得に失敗したため、チェック結果の通知をスキップしました。');
   }
 
   if (errors.length > 0) {
