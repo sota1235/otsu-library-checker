@@ -1,4 +1,4 @@
-import type { AccountError, AccountReport } from './types.js';
+import type { AccountError, AccountReport, Reservation } from './types.js';
 
 export async function postToSlack(webhookUrl: string, text: string): Promise<void> {
   const res = await fetch(webhookUrl, {
@@ -19,7 +19,7 @@ export function hasNotifiable(report: AccountReport): boolean {
 
 /**
  * 通知メッセージを組み立てる。
- * 全アカウントの貸出数・予約数を表示し、受取可能な予約・返却期限が近い貸出があればその一覧を、
+ * 全アカウントの貸出数・予約数を表示し、受取可能な予約（取置期限付き）・返却期限が近い貸出があればその一覧を、
  * なければその旨をアカウントごとに付ける。複数アカウントの場合はラベルごとに区切る。
  * failedLabels に取得に失敗したアカウントを渡すと、そのアカウントは未チェックである旨を表示する。
  */
@@ -44,7 +44,7 @@ export function buildReportMessage(
     if (report.readyReservations.length > 0) {
       lines.push(...gap, '🟢 受取可能な予約:');
       for (const r of report.readyReservations) {
-        lines.push(`・『${escapeSlackText(r.title)}』`);
+        lines.push(`・『${escapeSlackText(r.title)}』${formatHoldLimit(r)}`);
       }
     }
     if (report.dueSoonLoans.length > 0) {
@@ -72,6 +72,12 @@ export function buildErrorMessage(today: string, errors: AccountError[]): string
     lines.push('', `👤 ${escapeSlackText(label)}`, '```', escapeSlackText(detail), '```');
   }
   return lines.join('\n');
+}
+
+/** 取置期限が分かる場合は「(取置期限 残り3日: 2026/10/05)」の形式で返す。不明なら空文字 */
+function formatHoldLimit(r: Reservation): string {
+  if (r.holdLimit === undefined || r.holdDaysLeft === undefined) return '';
+  return `(取置期限 ${formatDaysLeft(r.holdDaysLeft)}: ${r.holdLimit})`;
 }
 
 function formatDaysLeft(days: number): string {
