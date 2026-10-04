@@ -7,6 +7,7 @@ const READY_RE = /受取可能|用意できました|ご用意|準備できま�
 const TITLE_HEADER_RE = /^(タイトル|書名|資料名|題名)/;
 const DUE_HEADER_RE = /^(返却期限|返却予定)/;
 const STATUS_HEADER_RE = /^(状況|状態)/;
+const CALL_NO_HEADER_RE = /^(請求記号|資料コード)/;
 const HOLD_LIMIT_HEADER_RE = /^取置期限/;
 const RESERVED_DATE_HEADER_RE = /^予約日/;
 const RANK_HEADER_RE = /^順位/;
@@ -24,16 +25,19 @@ export class ParseError extends Error {
  * 利用者のページのHTMLから貸出中・予約中の一覧を抽出する。
  *
  * ページ内の各テーブルのヘッダー行（th）を見て列を特定する。
- * - 「返却期限」列を持つテーブル → 貸出一覧
+ * - 「返却期限」列を持つテーブル → 貸出一覧（「請求記号」列がないものは電子書籍貸出一覧など別枠の貸出）
  * - 「状況」列と「予約日」列を持つテーブル → 予約一覧（「取置期限」列に日付があれば受取可能と判定し、期限も保持する）
  *
  * ページ上部のタブ見出し（「貸出 <件数>」「予約 <件数>」）の件数と照合し、
  * 一致しない場合はサイト構造が変わった可能性があるため ParseError を投げる。
+ * 別枠の貸出は見出しの件数に含まれないため、照合対象から外す（通知対象には含める）。
  */
 export function parseUserInfo(html: string, today: Date = new Date()): UserInfo {
   const $ = cheerio.load(html);
   const loans: Loan[] = [];
   const reservations: Reservation[] = [];
+  /** タブ見出しの「貸出 <件数>」に数えられる貸出だけの件数 */
+  let countedLoans = 0;
 
   $('table').each((_, table) => {
     const $table = $(table);
@@ -48,11 +52,15 @@ export function parseUserInfo(html: string, today: Date = new Date()): UserInfo 
 
     const dataRows = rows.filter((row) => row !== headerRow);
     if (columns.due !== undefined) {
+      // 「請求記号」列を持つのが通常の貸出一覧。持たないテーブル（電子書籍貸出一覧など）は
+      // 同じ貸出タブ内にあるがタブ見出しの件数には含まれないため、照合対象から外す。
+      const countedInTabHeading = columns.callNo !== undefined;
       for (const cells of eachDataRow($, dataRows, columns.title)) {
         const dateMatch = cells[columns.due]?.match(DATE_RE);
         if (!dateMatch) continue;
         const dueDate = formatDate(dateMatch);
         loans.push({ title: cells[columns.title], dueDate, daysLeft: diffDays(today, dueDate) });
+        if (countedInTabHeading) countedLoans++;
       }
     } else if (columns.status !== undefined && columns.reservedDate !== undefined) {
       for (const cells of eachDataRow($, dataRows, columns.title)) {
@@ -73,11 +81,13 @@ export function parseUserInfo(html: string, today: Date = new Date()): UserInfo 
   });
 
   const expected = extractTabCounts($);
-  if (expected.loans !== loans.length || expected.reservations !== reservations.length) {
+  if (expected.loans !== countedLoans || expected.reservations !== reservations.length) {
+    const uncounted = loans.length - countedLoans;
     throw new ParseError(
       `件数が一致しません（サイト構造が変わった可能性があります）: ` +
-        `貸出 見出し${expected.loans}件/解析${loans.length}件, ` +
-        `予約 見出し${expected.reservations}件/解析${reservations.length}件`,
+        `貸出 見出し${expected.loans}件/解析${countedLoans}件` +
+        (uncounted > 0 ? `(別枠の貸出${uncounted}件は照合対象外)` : '') +
+        `, 予約 見出し${expected.reservations}件/解析${reservations.length}件`,
     );
   }
 
@@ -106,6 +116,7 @@ function mapColumns(headers: string[]): ColumnMap {
   assign('title', TITLE_HEADER_RE);
   assign('due', DUE_HEADER_RE);
   assign('status', STATUS_HEADER_RE);
+  assign('callNo', CALL_NO_HEADER_RE);
   assign('holdLimit', HOLD_LIMIT_HEADER_RE);
   assign('reservedDate', RESERVED_DATE_HEADER_RE);
   assign('rank', RANK_HEADER_RE);
