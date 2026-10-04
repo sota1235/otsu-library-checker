@@ -106,7 +106,10 @@ async function checkAccount(config: Config, account: Account, now: Date): Promis
 
     console.log(`[${account.label}] 貸出中: ${info.loans.length}件, 予約中: ${info.reservations.length}件`);
     for (const l of info.loans) console.log(`  [貸出] ${l.title} 返却期限 ${l.dueDate} (残り${l.daysLeft}日)`);
-    for (const r of info.reservations) console.log(`  [予約] ${r.title} ${r.status}${r.isReady ? ' ★受取可能' : ''}`);
+    for (const r of info.reservations) {
+      const hold = r.holdLimit ? ` 取置期限 ${r.holdLimit} (残り${r.holdDaysLeft}日)` : '';
+      console.log(`  [予約] ${r.title} ${r.status}${r.isReady ? ' ★受取可能' : ''}${hold}`);
+    }
 
     return {
       label: account.label,

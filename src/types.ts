@@ -12,6 +12,10 @@ export interface Reservation {
   status: string;
   /** 受取可能かどうか */
   isReady: boolean;
+  /** 取置期限 (YYYY/MM/DD)。サイト上に表示されていない場合は undefined */
+  holdLimit?: string;
+  /** 取置期限までの残日数（当日は0、超過は負数）。holdLimit がない場合は undefined */
+  holdDaysLeft?: number;
 }
 
 export interface UserInfo {

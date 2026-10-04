@@ -25,7 +25,7 @@ export class ParseError extends Error {
  *
  * ページ内の各テーブルのヘッダー行（th）を見て列を特定する。
  * - 「返却期限」列を持つテーブル → 貸出一覧
- * - 「状況」列と「予約日」列を持つテーブル → 予約一覧
+ * - 「状況」列と「予約日」列を持つテーブル → 予約一覧（「取置期限」列に日付があれば受取可能と判定し、期限も保持する）
  *
  * ページ上部のタブ見出し（「貸出 <件数>」「予約 <件数>」）の件数と照合し、
  * 一致しない場合はサイト構造が変わった可能性があるため ParseError を投げる。
@@ -59,9 +59,15 @@ export function parseUserInfo(html: string, today: Date = new Date()): UserInfo 
         const rawStatus = cells[columns.status] ?? '';
         const rank = columns.rank !== undefined ? (cells[columns.rank] ?? '') : '';
         const status = rank ? `${rawStatus} (順位 ${rank})` : rawStatus;
-        const holdLimit = columns.holdLimit !== undefined ? (cells[columns.holdLimit] ?? '') : '';
-        const isReady = READY_RE.test(rawStatus) || DATE_RE.test(holdLimit);
-        reservations.push({ title: cells[columns.title], status, isReady });
+        const holdLimitMatch =
+          columns.holdLimit !== undefined ? cells[columns.holdLimit]?.match(DATE_RE) : undefined;
+        const isReady = READY_RE.test(rawStatus) || holdLimitMatch != null;
+        const reservation: Reservation = { title: cells[columns.title], status, isReady };
+        if (holdLimitMatch) {
+          reservation.holdLimit = formatDate(holdLimitMatch);
+          reservation.holdDaysLeft = diffDays(today, reservation.holdLimit);
+        }
+        reservations.push(reservation);
       }
     }
   });
@@ -126,8 +132,9 @@ function formatDate(m: RegExpMatchArray): string {
   return `${m[1]}/${m[2].padStart(2, '0')}/${m[3].padStart(2, '0')}`;
 }
 
-function diffDays(today: Date, dueDate: string): number {
-  const [y, m, d] = dueDate.split('/').map(Number);
+/** today から YYYY/MM/DD 形式の日付までの残日数（当日は0、超過は負数） */
+function diffDays(today: Date, date: string): number {
+  const [y, m, d] = date.split('/').map(Number);
   const due = Date.UTC(y, m - 1, d);
   const base = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
   return Math.round((due - base) / 86_400_000);
