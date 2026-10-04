@@ -96,33 +96,49 @@ op run --env-file=.env -- env DRY_RUN=1 DEBUG_DUMP_HTML=1 node dist/index.js
 
 ## 定期実行
 
-無人実行では `op` が認証プロンプトを出せないため、以下のいずれかが必要。
+launchd（macOS）で毎朝 9:00 に実行する。無人実行では `op` が認証プロンプトを出せないため、定期実行では 1Password を使わず **認証情報を macOS Keychain に保存し、`bin/run.sh` が実行時に読み出して環境変数として渡す**。リポジトリ内には平文の秘密を置かない。
 
-- **1Passwordアプリとの連携**: 1Passwordアプリの設定で「1Password CLIと連携」を有効にする。アプリがロック解除されていれば動作するが、ロック中は失敗する。
-- **サービスアカウント（推奨）**: 1Passwordで[サービスアカウント](https://developer.1password.com/docs/service-accounts/)を作成し、対象ボールトへの読み取り権限を付与する。トークンを `OP_SERVICE_ACCOUNT_TOKEN` として渡すと認証プロンプトなしで動作する。
-
-サービスアカウントのトークンはplistや `.env` に直書きせず、macOSのKeychainに保存して実行時に取り出す。
+### 1. 認証情報をKeychainに登録する
 
 ```bash
-# Keychainにトークンを保存（初回のみ）
-security add-generic-password -s otsu-library-checker-op -a "$USER" -w '<サービスアカウントトークン>'
+./bin/setup-keychain.sh
 ```
 
-### launchd を使う場合（macOS）
+利用券番号・パスワード（アカウントごと）と Slack Webhook URL を順に対話入力する。値は `security` コマンドのプロンプトが直接受け取るため、シェル履歴やプロセス一覧（`ps`）に残らない。login キーチェーンに以下のサービス名で保存される。
 
-`op run` を経由するため、実行するのはラッパースクリプトにする。`bin/run.sh` として以下を作成し、`chmod +x bin/run.sh` しておく。
+| サービス名 | 内容 |
+| --- | --- |
+| `otsu-library-checker-card-no-1` | アカウント1の利用券番号 |
+| `otsu-library-checker-password-1` | アカウント1のパスワード |
+| `otsu-library-checker-card-no-2` | アカウント2の利用券番号 |
+| `otsu-library-checker-password-2` | アカウント2のパスワード |
+| `otsu-library-checker-slack-webhook-url` | Slack Incoming Webhook URL（全アカウント共通） |
+
+同じスクリプトを再実行すれば値を上書き更新できる（「キーチェーンアクセス」アプリからも確認・変更できる）。
+
+アカウントを増やす場合は `bin/setup-keychain.sh` と `bin/run.sh` に `-3` / `_3` の組を追加する。
+
+### 2. アカウント名の設定
+
+通知に表示する名前は秘密ではないので `.env`（`.gitignore` 済み）に書く。`bin/run.sh` が export した認証情報は `dotenv` に上書きされないため、両者は共存できる。
+
+```dotenv
+OTSU_LIBRARY_LABEL_1=わたし
+OTSU_LIBRARY_LABEL_2=こども
+```
+
+空のままにすると「アカウント1」「アカウント2」と表示される。
+
+### 3. 動作確認
 
 ```bash
-#!/bin/zsh
-set -eu
-cd "$(dirname "$0")/.."
-export OP_SERVICE_ACCOUNT_TOKEN="$(security find-generic-password -s otsu-library-checker-op -w)"
-exec /opt/homebrew/bin/op run --env-file=.env -- /opt/homebrew/bin/node dist/index.js
+npm run build
+DRY_RUN=1 ./bin/run.sh
 ```
 
-`op` と `node` のパスは `which op` / `which node` で確認する（nvm等を使っている場合は絶対パスで指定する）。
+### 4. launchd への登録
 
-`~/Library/LaunchAgents/local.otsu-library-checker.plist` を作成する（毎朝8時に実行する例）。
+`~/Library/LaunchAgents/com.sota1235.otsu-library-checker.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -130,39 +146,60 @@ exec /opt/homebrew/bin/op run --env-file=.env -- /opt/homebrew/bin/node dist/ind
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>local.otsu-library-checker</string>
+  <string>com.sota1235.otsu-library-checker</string>
+
   <key>ProgramArguments</key>
   <array>
-    <string>/path/to/otsu-library-checker/bin/run.sh</string>
+    <string>/Users/sota1235/src/otsu-library-checker/bin/run.sh</string>
   </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/sota1235/src/otsu-library-checker</string>
+
   <key>StartCalendarInterval</key>
   <dict>
     <key>Hour</key>
-    <integer>8</integer>
+    <integer>9</integer>
     <key>Minute</key>
     <integer>0</integer>
   </dict>
+
   <key>StandardOutPath</key>
-  <string>/tmp/otsu-library-checker.log</string>
+  <string>/Users/sota1235/src/otsu-library-checker/launchd-stdout.log</string>
+
   <key>StandardErrorPath</key>
-  <string>/tmp/otsu-library-checker.log</string>
+  <string>/Users/sota1235/src/otsu-library-checker/launchd-stderr.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
 </dict>
 </plist>
 ```
 
 ```bash
-launchctl load ~/Library/LaunchAgents/local.otsu-library-checker.plist
+# 読み込み
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.sota1235.otsu-library-checker.plist
 
 # 手動で即時実行して動作確認
-launchctl start local.otsu-library-checker
-tail -f /tmp/otsu-library-checker.log
+launchctl kickstart -p "gui/$(id -u)/com.sota1235.otsu-library-checker"
+tail -f launchd-stdout.log launchd-stderr.log
+
+# 登録内容・前回終了コードの確認
+launchctl print "gui/$(id -u)/com.sota1235.otsu-library-checker"
+
+# 解除（plistを編集したら bootout → bootstrap で読み直す）
+launchctl bootout "gui/$(id -u)/com.sota1235.otsu-library-checker"
 ```
 
-### cron を使う場合
+### 注意点
 
-```cron
-0 8 * * * /path/to/otsu-library-checker/bin/run.sh >> /tmp/otsu-library-checker.log 2>&1
-```
+- ログは `launchd-stdout.log` / `launchd-stderr.log` に追記される（`.gitignore` 済み）。
+- 9:00 にMacがスリープしていた場合、launchd は起床後に遅れて実行する。電源が切れていた場合はその日はスキップされる。
+- `bin/run.sh` は `node` を絶対パス（`/opt/homebrew/bin/node`）で指定している。mise等でNodeを切り替えている場合は `which node` の結果に合わせて修正する。
+- `src/` を変更したら `npm run build` を忘れないこと。launchd が実行するのは `dist/index.js`。
 
 ## 通知例
 
@@ -207,6 +244,9 @@ tail -f /tmp/otsu-library-checker.log
 ## 構成
 
 ```
+bin/
+├── run.sh            # Keychainから認証情報を読んで実行（launchdが呼ぶ）
+└── setup-keychain.sh # 認証情報をKeychainに登録
 src/
 ├── index.ts          # エントリーポイント（チェック実行→Slack通知）
 ├── libraryClient.ts  # ログイン・貸出予約情報取得（cookie管理含む）
